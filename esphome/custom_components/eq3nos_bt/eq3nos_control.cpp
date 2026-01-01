@@ -1,0 +1,521 @@
+#include "eq3nos_control.h"
+#include "eq3nos_bt.h"
+#include "esphome/core/log.h"
+#include "esp_log.h"
+#include "eq3nos_conncommand.h"
+
+namespace esphome {
+namespace eq3nos_bt {
+
+static const char *TAG = "eq3nos_control";
+
+// Timer del task
+/*
+* Orologio di questo task - incrementa ogni 1 sec 
+*/
+void EQ3Control::increment_timer_applic() { this->timer_appl++; this->timer_query++;}
+
+/*
+* Task init
+*/
+void EQ3Control::app_task_init(){
+    if (!application_queue_ )
+        ESP_LOGE(TAG, "Errore creazione coda application");
+    if (application_queue_ == nullptr)
+		application_queue_ = xQueueCreate(MAX_APP_QUEUE, sizeof(ApplCommand));//		
+		this->timer_appl = STATUSTIMER -60;	
+		this->timer_ora = STATUSTIMER;
+		this->timer_query = 0;
+        this->recovery_counter = 0;
+        this->timer_recovery = 0;
+        parent_->publish_recovery_counter_sensor(this->recovery_counter);
+} 
+
+/*
+* Task main loop 
+*/
+void EQ3Control::app_task(){	
+	
+	this->update_status(); // accodamento comandi periodici
+	this->app_dequeuer(); // scodatore ed esecutore comandi
+	this->parse_msg(); // gestione delle risposte
+    if(this->app_task_busy_) { // recovery per mancata risposta
+        this->timer_recovery++;
+        if(this->timer_recovery > RECOVERY_MAX_TIME){
+            this->app_task_busy_ = false;
+            this->timer_recovery = 0;
+            this->recovery_counter++;
+            parent_->publish_recovery_counter_sensor(this->recovery_counter);
+        }
+    }
+}
+
+// Callback e gestione delle risposte 
+/*
+* Salvo dati ricevuti dalla valvola 
+* e segnalo dati pronti per elaborazione 
+*/
+void EQ3Control::handle_incoming_message(const std::vector<uint8_t> &msg) {
+
+    this->local_msg = msg; 
+    rcv_msg_reaady = true; // flag dato pronto
+     // Stampa contenuto in HEX
+    std::string hex;
+    char buf[6];
+    for (auto b : msg) {
+	    snprintf(buf, sizeof(buf), "%02X ", b);
+	    hex += buf;
+    }
+    ESP_LOGI(TAG, "Incoming_message - ricevuto: %s", hex.c_str());	
+}
+
+/*
+* Analizzo il messaggio ricevuto dalla valvola
+*/
+void EQ3Control::parse_msg(){
+
+    if(!rcv_msg_reaady) return; // no msg
+    rcv_msg_reaady = false;
+    if(!app_task_busy_) {
+		ESP_LOGW(TAG, "Ricevuto messaggio fuori protocollo");
+		return;
+	}
+    this-> local_msg_size = this->local_msg.size();
+	if (this-> local_msg_size == 0) return;  // sicurezza rcv_msg_reaady
+
+
+    uint8_t code = static_cast<uint8_t>(this->local_msg[0]);
+    
+	switch (code) {
+	    case 0x01:	   
+		    //ESP_LOGI(TAG, "Ricevuto messaggio tipo 0x01");
+		    if(this->application_status_ == ApplicationStatus::GET_SERIAL_NUMBER) {
+	           this->rcvd_get_info();             
+		    }
+		break;
+		case 0x02:	   
+		   // ESP_LOGI(TAG, "Ricevuto messaggio tipo 0x02");
+		    switch (this->application_status_){
+		    	case ApplicationStatus:: NOW_UPDATE_TIME:
+                case ApplicationStatus:: SET_MODE_AUTO:
+                case ApplicationStatus:: SET_MODE_MANUAL:
+                case ApplicationStatus:: SET_MODE_VACATION:
+		    	case ApplicationStatus:: SET_BOOST_SWITCH:
+		    	case ApplicationStatus:: GET_CURR_TEMPERATURE:
+		    	case ApplicationStatus:: SET_TARGET_TEMPERATURE:
+                case ApplicationStatus::SET_LOCK_SWITCH:
+		    	
+		    			this->rcvd_base_status(this->application_status_);
+		    	break;
+		    	
+		    	default:
+		    			 ESP_LOGW(TAG, "0x02 - Messaggio sconosciuto: 0x%02X", code);
+		    	break;		    	
+		     }
+		break;
+		case 0x03:	   
+		    //ESP_LOGI(TAG, "Ricevuto messaggio tipo 0x03");
+		    switch (this->application_status_){
+		    	
+		    	default:
+		    			 ESP_LOGW(TAG, "0x0 - Messaggio sconosciuto: 0x%02X", code);
+		    	break;
+		     }
+		break;
+
+		case 0x20:
+		  ESP_LOGI(TAG, "Ricevuto messaggio tipo 0x20");
+		  break;
+
+		case 0x40:
+		  ESP_LOGI(TAG, "Ricevuto messaggio tipo 0x40");
+		  break;
+
+		default:
+		  ESP_LOGW(TAG, "Messaggio sconosciuto: 0x%02X", code);
+		  break;
+	}
+	this->application_status_ = ApplicationStatus::APP_WAIT;	
+    this->app_task_busy_ = false;	
+    this->timer_recovery = 0;	
+}
+
+/*
+* La valvola ha risposta alla richiesta di serial number e versione. 
+  Estraggo e chiedo pubblicazione
+*/
+void EQ3Control::rcvd_get_info() {
+
+    if (local_msg.size() > 4) {  // assicurati che ci siano abbastanza byte
+        std::vector<uint8_t> serial_bytes(local_msg.begin() + 4, local_msg.end()-1); // Estrai dal byte 4 fino al penultimo byte 
+        std::string serial_number = Eq3Serial::decode(serial_bytes); // Decodifica
+        uint8_t fw = local_msg[1]; // Estrai il secondo byte
+        std::string fw_str = std::to_string(fw); //	ESP_LOGI(TAG, "🔢 Firmware decoded: %s", fw_str.c_str());	
+        parent_->publish_eq3_identification(serial_number, fw_str);	
+    } else {
+        ESP_LOGW(TAG, "Messaggio troppo corto per contenere il seriale (len=%d)", local_msg.size());
+    }
+}
+
+/*
+* Info standard risposte dalla valvola
+*/
+void EQ3Control::rcvd_base_status(ApplicationStatus tipo) {
+
+     // std::memcpy(&valve_base_status_, local_msg.data(), this-> local_msg_size );
+    //std::memcpy(&valve_base_status_, local_msg.data(), sizeof(Eq3StatusResponse));
+
+    Eq3StatusResponse st;
+
+   // std::memcpy(&st, local_msg.data(), sizeof(Eq3StatusResponse));
+    std::memcpy(&st, local_msg.data(),  this-> local_msg_size);
+
+    Eq3Mode mode = Eq3Mode::AUTO;
+    if(st.mode & 0x01)
+         mode = Eq3Mode::MANUAL;
+    if(st.mode & 0x02)
+         mode = Eq3Mode::VACATION;
+   
+    bool boost_mode = st.mode & 0x04;
+    bool dst_mode = st.mode & 0x08;
+    bool open_windows_mode = st.mode & 0x10;
+    bool locked_mode = st.mode & 0x20;
+    bool unknown_mode = st.mode & 0x40;
+    bool battery_low = st.mode & 0x80;
+
+    uint8_t valve_percent = st.valve_percent;
+    float target_temp_x2  = st.target_temp_x2 / 2.0f;
+   
+    parent_->publish_base_field_(valve_percent, target_temp_x2, mode, locked_mode, boost_mode, open_windows_mode, battery_low);
+  
+}
+
+// Accodatore, comandi periodici e asincroni
+/*
+* Accodatore comandi per application
+*/
+bool EQ3Control::applic_queuer(ApplCommand cmd) {
+    //ESP_LOGI(TAG, "Richieste per applicazione");
+
+    if (!application_queue_) return false;
+    if (xQueueSendToBack(application_queue_, &cmd, pdMS_TO_TICKS(10)) != pdTRUE) {
+        ESP_LOGW(TAG, "App Queue piena o non disponibile");
+        return false;
+    }
+    return true;
+}
+
+/*
+* Accodo richiesta di aggiornamento dello stato
+*/
+void EQ3Control::update_status(){	
+    
+	if(this->app_task_busy_) return;
+	bool err;  //ESP_LOGI(TAG, "Accodo messaggio comando : ");
+	if(this->timer_query > NORMALQUERY  ){
+	    this->timer_query = 0;
+	    //ApplCommand cmd{AppCommandType::GET_CURR_TEMP, false, 0};
+        ApplCommand cmd = {AppCommandType::UPDATE_TIME, false, 0};
+        err = this->applic_queuer(cmd);	
+	}
+    if(this->timer_appl > this->timer_ora){	 
+        this->timer_appl = 0;
+        ApplCommand cmd{AppCommandType::GET_INFO, false, 0};
+        err = this->applic_queuer(cmd);
+        cmd = {AppCommandType::UPDATE_TIME, false, 0};
+        err = this->applic_queuer(cmd);   
+        //ESP_LOGI(TAG, "Accodamento riuscito? %s", err ? "SI": "NO");
+    }
+}
+
+// Accodamento richieste asincrone
+/*
+* Accodo richiesta di set mode
+*/
+void EQ3Control::cmd_set_mode(Eq3Mode mode) {
+  
+  ApplCommand cmd;
+  switch (mode) {  
+    case Eq3Mode::AUTO:
+        cmd = {AppCommandType::SET_AUTO, true, 0};
+      break;
+    case Eq3Mode::MANUAL:
+        cmd = {AppCommandType::SET_MANUAL, true, 0};
+      break;
+    case Eq3Mode::VACATION:
+        cmd = {AppCommandType::SET_VACATION, true, 0};
+      break;
+  }
+   bool err = this->applic_queuer(cmd); 
+   ESP_LOGI(TAG, "Accodamento mode riuscito? %s", err ? "SI": "NO");
+}
+
+/*
+* Accodamento richiesta lock
+*/
+void EQ3Control::cmd_lock(bool state){
+    ESP_LOGW(TAG, "Accodo lock");
+    ApplCommand cmd{AppCommandType::SET_LOCK, true, 0};
+    if(!state)
+        cmd = {AppCommandType::SET_LOCK, false, 0};
+    bool err = this->applic_queuer(cmd); 
+    ESP_LOGI(TAG, "Accodamento riuscito? %s", err ? "SI": "NO");
+}
+
+/*
+* Accodamento richiesta boost
+*/
+void EQ3Control::cmd_boost(bool state){
+    ESP_LOGW(TAG, "Accodo boost");
+    ApplCommand cmd{AppCommandType::SET_BOOST, true, 0};
+    if(!state)
+        cmd = {AppCommandType::SET_BOOST, false, 0};
+    bool err = this->applic_queuer(cmd); 
+    ESP_LOGI(TAG, "Accodamento riuscito? %s", err ? "SI": "NO");
+}
+/*
+* Accodamento richiesta  target temperature
+*/
+void EQ3Control::send_setpoint_(uint8_t target){
+    ESP_LOGW(TAG, "Accodo target temperature");
+    ApplCommand cmd{AppCommandType::SET_TARGET_TEMP, false, target};
+    bool err = this->applic_queuer(cmd); 
+    ESP_LOGI(TAG, "Accodamento riuscito? %s", err ? "SI": "NO");
+}
+
+
+// Elaborazione richieste
+/*
+* Scodatore
+*/
+int  EQ3Control::app_dequeuer(){	
+
+    ApplCommand cmd;
+    bool command_received = false;
+    if( !this->app_task_busy_){
+        command_received = false;       
+        if (xQueueReceive(application_queue_, &cmd, 0) == pdTRUE) { 
+            command_received = true;
+        }
+        if(command_received){
+            command_received = false;
+            this->app_task_busy_ = true;
+            this->rcv_msg_reaady = false;
+            // ESP_LOGI(TAG, "📨 Scodato messaggio : ");
+            switch(cmd.type) {
+                case AppCommandType::GET_INFO:
+                    this->get_info();
+                break;
+                case AppCommandType::SET_AUTO:
+                    send_mode(Eq3Mode::AUTO);     
+                break;
+                case AppCommandType::SET_MANUAL:
+                    send_mode(Eq3Mode::MANUAL);     
+                break;
+                case AppCommandType::SET_VACATION:
+                    send_mode(Eq3Mode::VACATION);    
+                break;
+                case AppCommandType::SET_LOCK:
+                    send_lock(cmd.status);     
+                break; 
+                case AppCommandType::SET_BOOST:
+                    send_boost(cmd.status); //  ESP_LOGI(TAG, "dopo SET_BOOST ");      
+                break; 
+                case AppCommandType::GET_CURR_TEMP:
+                    this->get_current_temp();
+                break;  
+                case AppCommandType::UPDATE_TIME:               
+                    set_eq3_time(); //  ESP_LOGI(TAG, "Inizio set_eq3_time");        
+                break; 
+                case AppCommandType::SET_TARGET_TEMP:
+                    send_target_temp(cmd.value);       
+                break; 
+                
+  
+                default:
+                break;
+            }
+        }
+    } 
+
+    return 0;
+}
+ 
+/*
+* chiedi versione e numero di serie della valvola
+*/
+void EQ3Control::get_info(){
+		ESP_LOGW(TAG, "Inviato chiedi serial number");
+		ConnCommand cmd;
+        cmd.type = ConnCommandType::SEND_RAW;
+        cmd.data[0] = 0x00;   // GET INFO
+        cmd.length = 1;
+        this->application_status_ = ApplicationStatus::GET_SERIAL_NUMBER;
+		parent_->send_command_to_connection(cmd);
+		this->app_task_busy_=true;	// flag di elaborazione in corso
+	
+}
+
+/*
+* chiedi temperatura
+*/
+void EQ3Control::get_current_temp(){
+    ESP_LOGW(TAG, "Inviato chiedi target temperatura forse errato");
+		ConnCommand cmd;
+        cmd.type = ConnCommandType::SEND_RAW;
+        cmd.data[0] = 0x03;   // GET TEMP 
+      //  cmd.data[1] = 0x00;   // GET TEMP 
+        cmd.length = 1;
+        this->application_status_ = ApplicationStatus::GET_CURR_TEMPERATURE;
+        this->app_task_busy_=true;	// flag di elaborazione in corso
+		parent_->send_command_to_connection(cmd);		
+}
+
+/*
+* Aggiorna orologio della valvola
+*/
+void EQ3Control::set_eq3_time() {
+	 ESP_LOGW(TAG, "Inviato set time");
+	auto now  = parent_->get_eq3_time();
+    Eq3SetTime pkt;
+   
+    pkt.cmd = 0x03;
+    pkt.year   = now.year % 100;
+    pkt.month  = now.month;
+    pkt.day    = now.day_of_month;
+    pkt.hour   = now.hour;
+    pkt.minute = now.minute;
+    pkt.second = now.second; 
+     
+    ConnCommand cmd;
+    cmd.type = ConnCommandType::SEND_RAW;
+    /*cmd.data[0] = 0x03;
+    cmd.data[1] = now.year % 100;
+    cmd.data[2] = now.month;
+    cmd.data[3] = now.day_of_month;
+    cmd.data[4] = now.hour;
+    cmd.data[5] = now.minute;
+    cmd.data[6] = now.second; 
+    cmd.length = 7;*/
+
+    std::memcpy(cmd.data, &pkt, sizeof(Eq3SetTime));
+    cmd.length = sizeof(Eq3SetTime);   // meglio di 7 hardcoded
+
+    this->application_status_ = ApplicationStatus::NOW_UPDATE_TIME;
+    this->app_task_busy_ = true;
+    parent_->send_command_to_connection(cmd);
+   // parent_->send_command_to_connection(pkt);
+   
+}
+
+/*
+* Mode manual
+*/
+void EQ3Control::send_mode(Eq3Mode mode){
+   // ESP_LOGW(TAG, "invio  mode manual");
+    ConnCommand cmd;
+    cmd.type = ConnCommandType::SEND_RAW;
+    cmd.length = 2;
+    switch (mode){
+        case Eq3Mode::AUTO:
+            cmd.data[0] = 0x40;   
+            cmd.data[1] = 0x00;  
+            this->application_status_ = ApplicationStatus::SET_MODE_AUTO;
+        break;
+        case Eq3Mode::MANUAL:
+            cmd.data[0] = 0x40;   
+            cmd.data[1] = 0x40;  
+            this->application_status_ = ApplicationStatus::SET_MODE_MANUAL;
+        break;
+        case Eq3Mode::VACATION:
+            cmd.data[0] = 0x40;   
+            cmd.data[1] = 0xA3;  // target temperature
+            cmd.data[2] = 0x1F;  // day
+            cmd.data[3] = 0x11;  // year
+            cmd.data[4] = 0x2B;  // time
+            cmd.data[5] = 0x03;  // time
+            cmd.length = 6;
+            this->application_status_ = ApplicationStatus::SET_MODE_MANUAL;
+        break;
+    }
+		  
+    this->app_task_busy_=true;	// flag di elaborazione in corso    
+	parent_->send_command_to_connection(cmd);
+   
+}
+
+/*
+* Invia il comando alla valvola
+*/
+void EQ3Control::send_target_temp(uint8_t temp){
+    ESP_LOGW(TAG, "Sto settando la temperatura a %d", temp);
+    
+	ConnCommand cmd;
+    cmd.type = ConnCommandType::SEND_RAW;
+    cmd.data[0] = 0x41;   
+    cmd.data[1] = temp;  
+    cmd.length = 2;
+    
+    this->application_status_ = ApplicationStatus::SET_TARGET_TEMPERATURE;
+    this->app_task_busy_=true;	// flag di elaborazione in corso    
+	parent_->send_command_to_connection(cmd);
+   
+}
+
+/*
+* Invia il comando alla valvola
+*/
+void EQ3Control::send_lock(bool state){
+    ESP_LOGW(TAG, "invio lock");
+    
+		ConnCommand cmd;
+    cmd.type = ConnCommandType::SEND_RAW;
+    cmd.data[0] = 0x80;   
+    cmd.data[2] = 0x00;  
+    if(!state)
+        cmd.data[1] = 0x00;  
+    else
+        cmd.data[1] = 0x01;  
+   
+    cmd.length = 2;
+    
+    this->application_status_ = ApplicationStatus::SET_LOCK_SWITCH;
+    this->app_task_busy_=true;	// flag di elaborazione in corso    
+	parent_->send_command_to_connection(cmd);
+   
+}
+/*
+* Invia il comando alla valvola
+*/
+void EQ3Control::send_boost(bool state){
+    ESP_LOGW(TAG, "Invio boost");
+    
+		ConnCommand cmd;
+    cmd.type = ConnCommandType::SEND_RAW;
+    cmd.data[0] = 0x45;   
+    cmd.data[2] = 0x00;  
+    if(!state)
+        cmd.data[1] = 0x00;  
+    else
+        cmd.data[1] = 0x01;  
+   
+    cmd.length = 2;
+    
+    this->application_status_ = ApplicationStatus::SET_BOOST_SWITCH;
+    this->app_task_busy_=true;	// flag di elaborazione in corso    
+	parent_->send_command_to_connection(cmd);
+   
+}
+
+
+/*
+*
+*/
+void EQ3Control::set_parent(EQ3NOS *parent) { 
+    this->parent_ = parent; 
+}
+
+
+}  // namespace eq3_bt
+}  // namespace esphome
+

@@ -1,0 +1,137 @@
+esphome:
+  name: eq3bletest
+  friendly_name: eq3bletest
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+# Enable logging
+logger:
+  level: DEBUG
+  logs:
+#    esp32_ble_client: DEBUG
+#    esp32_ble_tracker: DEBUG
+    eq3nos_bt: DEBUG
+#  level: VERY_VERBOSE
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_key 
+#  services:
+#    - service: eq3_set_target
+
+ota:
+  - platform: esphome
+    password: !secret ota_pwd 
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: ${friendly_name} Fallback 
+    password: !secret ap_pwd 
+
+captive_portal:
+
+time:
+  - platform: sntp
+    id: sntp_time
+
+# Abilita il tracker BLE
+esp32_ble_tracker:
+  scan_parameters:
+    interval: 1100ms
+    window: 1100ms
+    active: true
+
+ble_client:
+  - mac_address:  !secret mac_01 
+    id: eq3_client_1
+    auto_connect: false
+
+  - mac_address: !secret mac_02
+    id: eq3_client_2
+    auto_connect: false
+
+eq3nos_bt:
+  - id: valve_01
+    name: "room_01"
+    mac_address: !secret mac_01 
+    ble_client_id: eq3_client_1
+    time_id: sntp_time
+    
+    mode:
+      name: "A1"
+    lock:
+      name: "B1"
+    boost:
+      name: "C1"
+    toff:
+      name: "D1"
+    setpoint:
+      id: valve_01_setpoint
+      name: "E1"
+      mode: box
+    eq3_serial:
+      name: "F1"
+    eq3_firmware:
+      name: "G1" 
+    battery_low:
+      name: "H1"
+    watchdog:
+      name: "I1" 
+    recovery_counter:
+      name: "J1" 
+    valve_position:
+      name: "K1"
+    current_temperature:
+      name: "L1"
+    target_temperature:
+      name: "M1"
+
+  - id: valve_02
+    name: "room_02"
+    mac_address: !secret mac_02 
+    ble_client_id: eq3_client_2
+    time_id: sntp_time
+    
+    mode:
+      name: "A2"
+    lock:
+      name: "B2"
+    boost:
+      name: "C2"
+    toff:
+      name: "D2"
+    setpoint:
+      id: valve_2_setpoint
+      name: "E2"
+      mode: box
+    eq3_serial:
+      name: "F2"
+    eq3_firmware:
+      name: "G2" 
+    battery_low:
+      name: "H2"
+    watchdog:
+      name: "I2" 
+    recovery_counter:
+      name: "J2" 
+    valve_position:
+      name: "K2"
+    current_temperature:
+      name: "L2"
+    target_temperature:
+      name: "M2"
+
+text_sensor:
+
+switch:
+
+   
+    
