@@ -15,7 +15,7 @@ void EQ3ModeSelect::control(const std::string &value) {
     if (!parent_) {
         ESP_LOGW(TAG, "Mode select parent not set!");
         return;
-    }
+    } 
     if (value == "auto") {
         parent_->control_.cmd_set_mode(Eq3Mode::AUTO);
     } else if (value == "manual") {
@@ -51,7 +51,7 @@ void EQ3BoostSwitch::write_state(bool state) {
 
 // =================== OFF SWITCH ===================
 void EQ3OffSwitch::write_state(bool state) {
-  ESP_LOGI(TAG, "Off switch changed state: %s", state ? "ON" : "OFF");
+  EQ3_D(TAG, "Off switch changed state: %s", state ? "ON" : "OFF");
   if (!parent_) {
     ESP_LOGW(TAG, "Off switch parent not set!");
     return;
@@ -61,12 +61,12 @@ void EQ3OffSwitch::write_state(bool state) {
 }
 
 void EQ3NOS::set_mode_select(EQ3ModeSelect *sel) {
-   ESP_LOGW(TAG, "I2NOS - Set mode select");
+   EQ3_D(TAG, "Set mode select");
   mode_select_ = sel;
 }
 
 void EQ3NOS::request_boost(bool state) {
-  ESP_LOGI(TAG, " Cosa devo fare qui? Request BOOST state: %s", state ? "ON" : "OFF");
+  EQ3_D(TAG, " Cosa devo fare qui? Request BOOST state: %s", state ? "ON" : "OFF");
 
 }
 
@@ -77,7 +77,7 @@ void EQ3NOS::set_target_temperature(float temp) {
     temp = clamp(temp, 5.0f, 30.0f);
     uint8_t target = static_cast<uint8_t>(roundf(temp * 2.0f));
     control_.send_setpoint_(target);
-    ESP_LOGI("EQ3", "Setpoint %.1f °C -> TT = 0x%02X (%d)",
+    EQ3_D("EQ3", "Setpoint %.1f °C -> TT = 0x%02X (%d)",
          temp, target, target);
 }
 
@@ -179,8 +179,7 @@ void EQ3NOS::publish_base_field_(uint8_t vp, float tt,  Eq3Mode mode, bool lm, b
 */
 void EQ3NOS::send_command_to_connection(const ConnCommand &cmd ) {  
 		this->get_eq3_time();
-    bool error = connection_.connect_queuer(cmd);
-    //ESP_LOGI(TAG, "Accodamento a connect riuscito: %s", error ? "SI" : "NO");   
+    bool error = connection_.connect_queuer(cmd);   
 }
 
 /*
@@ -192,7 +191,7 @@ void EQ3NOS::send_msg_to_app(const std::vector<uint8_t> &msg) {
 
 esphome::ESPTime EQ3NOS::get_eq3_time(){
 	auto now = time_source_->now();
-	ESP_LOGI("eq3", "Time now: %04d-%02d-%02d %02d:%02d:%02d",
+	EQ3_D("eq3", "Time now: %04d-%02d-%02d %02d:%02d:%02d",
          now.year, now.month, now.day_of_month,
          now.hour, now.minute, now.second);
          return now;
@@ -228,11 +227,8 @@ void EQ3NOS::module_init() {
     //delay(3000);
     this->module_to_init = false;
     if (ble_client_init_error)
-        ESP_LOGE(TAG, "I2NOS-->Parent BLE non impostato, setup interrotto");
-    else
-        ESP_LOGE(TAG, "I2NOS-->Parent BLE impostato correttamente");
-     
-    ESP_LOGI(TAG, "📡 EQ3NOS: setup completato"); 
+        ESP_LOGE(TAG, "Parent BLE not set!");   
+    EQ3_D(TAG, "📡 EQ3NOS: setup complited"); 
 }
 
 /*
@@ -253,8 +249,6 @@ void EQ3NOS::loop() {
     this->control_.app_task();
     this->connection_.connect_task();
 }
-
-
 
 }  // namespace eq3nos_bt
 }  // namespace esphome

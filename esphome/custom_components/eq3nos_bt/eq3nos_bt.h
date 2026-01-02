@@ -1,5 +1,5 @@
 #pragma once
-#define DEBUG_YES
+#include "debug.h"
 #include "eq3nos_connect.h"
 #include "eq3nos_control.h"
 #include "eq3_target_number.h"
@@ -16,14 +16,13 @@
 #include "freertos/semphr.h"
 
 
-
 namespace esphome {
 namespace eq3nos_bt {
 
 // Forward declaration 
 class EQ3NOS;
 class EQ3BoostSwitch;
-class EQ3OffSwitch;
+class EQ3OffSwitch; 
 class EQ3ModeSelect;   
 class EQ3LockSwitch;
 
@@ -52,7 +51,6 @@ class EQ3LockSwitch : public esphome::switch_::Switch {
 // BOOST Switch
 class EQ3BoostSwitch : public esphome::switch_::Switch {
  public:
-
   void write_state(bool state) override;  // chiamato da Home Assistant
   void set_parent(EQ3NOS *parent) { parent_ = parent; }
 
@@ -115,7 +113,7 @@ class EQ3NOS
         void set_recovery_counter_sensor(sensor::Sensor *sens) { recovery_counter_sensor_ = sens; }
 
         void set_target_temperature(float temp);
-		void set_target_number(EQ3TargetNumber *num) {
+		void set_target_number(EQ3TargetNumber *num) { 
 		    target_number_ = num;
             num->set_parent(this);
         }
@@ -136,7 +134,6 @@ class EQ3NOS
 		void request_boost(bool state);
 		void request_off(bool state);
 
-		
 		EQ3Control control_;
 		
 		void set_time_source(esphome::time::RealTimeClock *t) {this->time_source_ = t; }

@@ -1,6 +1,9 @@
 esphome:
   name: eq3bletest
   friendly_name: eq3bletest
+  platformio_options:
+    build_flags:
+      - -DEQ3_DEVLOG=1
 
 esp32:
   board: esp32dev
@@ -8,13 +11,14 @@ esp32:
     type: esp-idf
 
 # Enable logging
+#  level: VERY_VERBOSE
 logger:
   level: DEBUG
   logs:
-#    esp32_ble_client: DEBUG
-#    esp32_ble_tracker: DEBUG
     eq3nos_bt: DEBUG
-#  level: VERY_VERBOSE
+    #    esp32_ble_client: DEBUG
+    #    esp32_ble_tracker: DEBUG
+
 
 # Enable Home Assistant API
 api:
