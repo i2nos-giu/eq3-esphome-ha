@@ -7,6 +7,7 @@
 #include "eq3nos_conncommand.h"
 
 #define DISCONNECT_NOW 3 // disconnecti dopo 3 sec
+#define WATCHDOG_TIMEOUT 15 // Errore dopo 15 sec senza risposta BLE
 
 namespace esphome {
 namespace eq3nos_bt {
@@ -52,7 +53,7 @@ public:
     esp_ble_gattc_cb_param_t *param);
         
     esphome::esp32_ble_client::BLECharacteristic *write_ch_ = nullptr;
-		esphome::esp32_ble_client::BLECharacteristic *notify_ch_ = nullptr;
+	esphome::esp32_ble_client::BLECharacteristic *notify_ch_ = nullptr;
      
     uint16_t service_handle_{0};
     uint16_t write_handle_{0};
@@ -83,10 +84,12 @@ private:
     EQ3NOS *parent_{nullptr};
     QueueHandle_t connection_queue_{nullptr};
     ConnectionStatus connection_status_;
+    void connectionWatchdog();
     //const uint8_t *temp_cmd_data[16];
     uint8_t temp_cmd_data[16];
     size_t temp_cmd_len = 0;
 	uint32_t timer_connect = 0;
+    uint32_t connection_watchdog = 0;
     bool resolved = false;
     bool rcv_replay = false;
     bool conn_task_busy_ = false;

@@ -1,4 +1,3 @@
-# eq3-esphome-ha
 # EQ3 BLE valves integration with ESPHome
 
 ## What is this?

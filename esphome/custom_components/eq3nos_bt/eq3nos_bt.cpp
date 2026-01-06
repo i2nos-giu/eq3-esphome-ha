@@ -7,6 +7,70 @@ namespace eq3nos_bt {
 
 static const char *TAG = "eq3nos_bt";
 
+// =================== EQ3NOS ===================
+void EQ3NOS::setup() {
+
+    this->ble_client_init_error = true;
+    if (ble_client::BLEClientNode::parent_ == nullptr) {
+        this->ble_client_init_error = true;
+    } else 
+        this->ble_client_init_error = false;
+
+    // Registro il nodo sul BLE client
+    this->set_ble_client_parent(ble_client::BLEClientNode::parent_);
+    ble_client::BLEClientNode::parent_->register_ble_node(this);
+
+    control_.set_parent(this);
+    control_.app_task_init();
+
+    // Inizializzo connessione
+    connection_.set_parent(this);      // parent per callback di connessione
+    connection_.con_task_init();
+    
+    sync_target_temperature = true;  // sincronizza il display della temperatura target
+
+    this->module_to_init = true;
+}
+// Init check
+void EQ3NOS::module_init() {
+    //delay(3000);
+    this->module_to_init = false;
+    if (ble_client_init_error)
+        ESP_LOGE(TAG, "Parent BLE not set!");   
+    EQ3_D(TAG, "📡 EQ3NOS: setup complited"); 
+}
+
+// Main loop
+void EQ3NOS::loop() {
+    if(this->module_to_init == true)
+        module_init();
+    
+    static uint32_t last_attempt = 0;
+    
+	if (millis() - last_attempt < 1000) return; // timer 1 secondo
+    last_attempt = millis();
+   
+    this->control_.increment_timer_applic();
+    this->connection_.increment_timer_connect();
+    
+    this->control_.app_task();
+    this->connection_.connect_task();
+}
+
+// Ruota comando al task connection
+void EQ3NOS::send_command_to_connection(const ConnCommand &cmd ) {  
+		//this->get_eq3_time();
+    EQ3_D(TAG, "Received command from application");
+    bool error = connection_.connect_queuer(cmd);  
+    EQ3_D(TAG, "%s command to connection.", error? "queued": "not queued" ); 
+}
+
+// Ruota il messaggio all'applicazione
+void EQ3NOS::send_msg_to_app(const std::vector<uint8_t> &msg) {
+    EQ3_D(TAG, "Received replay from connection");
+    this->control_.handle_incoming_message(msg);
+    EQ3_D(TAG, "replay received from application" ); 
+}
 /*
 * Mode Selector
 */
@@ -73,12 +137,12 @@ void EQ3NOS::request_boost(bool state) {
 /*
 * Set target temperatura - Richiamata da Home Assistant
 */
-void EQ3NOS::set_target_temperature(float temp) {
-    temp = clamp(temp, 5.0f, 30.0f);
-    uint8_t target = static_cast<uint8_t>(roundf(temp * 2.0f));
+void EQ3NOS::set_target_temperature(float celsius) {
+    celsius = clamp(celsius, 5.0f, 30.0f);
+    uint8_t target = static_cast<uint8_t>(roundf(celsius * 2.0f));
     control_.send_setpoint_(target);
     EQ3_D("EQ3", "Setpoint %.1f °C -> TT = 0x%02X (%d)",
-         temp, target, target);
+         celsius, target, target);
 }
 
 /*
@@ -115,7 +179,7 @@ void EQ3NOS::publish_recovery_counter_sensor(uint16_t rc_) {
 /*
 * Pubblica temperature e flags
 */
-void EQ3NOS::publish_base_field_(uint8_t vp, float tt,  Eq3Mode mode, bool lm, bool bt, bool ws, bool bl){
+void EQ3NOS::publish_base_field(uint8_t vp, float tt,  Eq3Mode mode, bool lm, bool bt, bool ws, bool bl){
     this->valve_percent = vp;
     //this->current_temperature = ct;
     this->target_temperature = tt;
@@ -174,81 +238,18 @@ void EQ3NOS::publish_base_field_(uint8_t vp, float tt,  Eq3Mode mode, bool lm, b
     }
 }
 
-/*
-* Ruota comando al task connection
-*/
-void EQ3NOS::send_command_to_connection(const ConnCommand &cmd ) {  
-		this->get_eq3_time();
-    bool error = connection_.connect_queuer(cmd);   
-}
 
-/*
-* Ruota il messaggio all'applicazione
-*/
-void EQ3NOS::send_msg_to_app(const std::vector<uint8_t> &msg) {
-    this->control_.handle_incoming_message(msg);
-}
 
 esphome::ESPTime EQ3NOS::get_eq3_time(){
 	auto now = time_source_->now();
-	EQ3_D("eq3", "Time now: %04d-%02d-%02d %02d:%02d:%02d",
+	EQ3_D(TAG, "Time now: %04d-%02d-%02d %02d:%02d:%02d",
          now.year, now.month, now.day_of_month,
          now.hour, now.minute, now.second);
          return now;
 }
 
 
-// =================== EQ3NOS ===================
-void EQ3NOS::setup() {
 
-    this->ble_client_init_error = true;
-    if (ble_client::BLEClientNode::parent_ == nullptr) {
-        this->ble_client_init_error = true;
-    } else 
-        this->ble_client_init_error = false;
-
-    // Registro il nodo sul BLE client
-    this->set_ble_client_parent(ble_client::BLEClientNode::parent_);
-    ble_client::BLEClientNode::parent_->register_ble_node(this);
-
-    control_.set_parent(this);
-    control_.app_task_init();
-
-    // Inizializzo connessione
-    connection_.set_parent(this);      // parent per callback di connessione
-    connection_.con_task_init();
-    
-    sync_target_temperature = true;  // sincronizza il display della temperatura target
-
-    this->module_to_init = true;
-}
-
-void EQ3NOS::module_init() {
-    //delay(3000);
-    this->module_to_init = false;
-    if (ble_client_init_error)
-        ESP_LOGE(TAG, "Parent BLE not set!");   
-    EQ3_D(TAG, "📡 EQ3NOS: setup complited"); 
-}
-
-/*
-* Main loop
-*/
-void EQ3NOS::loop() {
-    if(this->module_to_init == true)
-        module_init();
-    
-    static uint32_t last_attempt = 0;
-    
-	if (millis() - last_attempt < 1000) return; // timer 1 secondo
-    last_attempt = millis();
-   
-    this->control_.increment_timer_applic();
-    this->connection_.increment_timer_connect();
-    
-    this->control_.app_task();
-    this->connection_.connect_task();
-}
 
 }  // namespace eq3nos_bt
 }  // namespace esphome

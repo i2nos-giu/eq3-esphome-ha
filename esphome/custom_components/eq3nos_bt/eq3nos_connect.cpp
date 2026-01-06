@@ -53,9 +53,7 @@ void EQ3Connection::on_ble_event(esp_gattc_cb_event_t event,
 	}
 }
 
-/*
-* Gira il messaggio ricevuto dalla valvola all'apllicazione
-*/
+// Gira il messaggio ricevuto dalla valvola all'applicazione
 void EQ3Connection::send_replay_to_app() { this->parent_->send_msg_to_app(local_copy); }
 
 /*
@@ -84,9 +82,7 @@ void  EQ3Connection::on_services_resolved_manual() {
    // ESP_LOGW(TAG, "write_ch_=%p handle=%04X", this->write_ch_, this->write_ch_ ? this->write_ch_->handle : 0);
 }
 
-/*
-* Dopo la connessione occorre settare il canale di notifica
-*/
+// Dopo la connessione occorre settare il canale di notifica
 void EQ3Connection::after_connected_() {
 
     auto *cli = this->parent_->ble();
@@ -130,66 +126,30 @@ void EQ3Connection::after_connected_() {
     } 
 }
 
-/*
-* Invio Comando alla valvola
-*/
-void EQ3Connection::send_command() {
 
-    // Verifica write_ch_
-    if (!this->write_ch_) {
-        ESP_LOGW(TAG, "write channel unavailable");
-        return;
-    }
-    bool now_connected = parent_->ble()->connected();
-    if (!now_connected) {
-        ESP_LOGW(TAG, "Not connected, command ignored");
-        return;
-    }
+// Create connection queue
+void EQ3Connection::con_task_init(){
 
-    // Validazione lunghezza
-    if (this->temp_cmd_len == 0 || this->temp_cmd_len > 23) {
-        ESP_LOGW(TAG, "Command lenght error (%i)", temp_cmd_len);
-        return;
-    }
+    if (!connection_queue_) 
+        ESP_LOGE(TAG, "Failed to create connection queue");
+    if (connection_queue_ == nullptr) { 
+        connection_queue_ = xQueueCreate(MAX_CONN_QUEUE, sizeof(ConnCommand));
+    } 
+   this->connection_status_ = ConnectionStatus::WAIT_STATE;
+} 
 
-    // Otteniamo il BLEClient tramite il parent EQ3BT
-    auto *cli = this->parent_->ble();
-    if (!cli) {
-        ESP_LOGE(TAG, "BLEClient unavailable");
-        return;
-    }
+// Timer of this task
+void EQ3Connection::increment_timer_connect() { this->timer_connect++; this->connection_watchdog++;}
 
-    // Eseguiamo la scrittura sulla characteristic
-    esp_err_t err = esp_ble_gattc_write_char(
-        cli->get_gattc_if(),
-        cli->get_conn_id(),
-        this->write_ch_->handle,
-        temp_cmd_len,
-        (uint8_t *)temp_cmd_data,
-        ESP_GATT_WRITE_TYPE_RSP,
-        ESP_GATT_AUTH_REQ_NONE
-    );
-
-    // Logging
-    if (err == ESP_OK) {
-        
-        std::string hex;
-        for (size_t i = 0; i < temp_cmd_len; i++) {
-            char buf[4];
-            sprintf(buf, " %02X", temp_cmd_data[i]);
-            hex += buf;
-        }
-        EQ3_D(TAG, "send_command - handle=0x%04X len=%d data:%s",
-            this->write_ch_->handle, (int)temp_cmd_len, hex.c_str());
-       
-    } else {
-        ESP_LOGW(TAG, "Send command error (err=%d)", err);
-    }
+// This Task main loop 
+void EQ3Connection::connect_task(){	
+	
+	this->conn_dequeuer();
+	this->session_Processor();
+    this->connectionWatchdog();
 }
 
-/*
-* Accodatore comandi per connection
-*/
+// Async command queuer for task ble connection
 bool EQ3Connection::connect_queuer(const ConnCommand &cmd) {
 
     EQ3_D(TAG, "Connect task received command type=%d, len=%d from application task",
@@ -206,15 +166,55 @@ bool EQ3Connection::connect_queuer(const ConnCommand &cmd) {
    // }
     ConnCommand copy = cmd;
     if (xQueueSendToBack(connection_queue_, &copy, pdMS_TO_TICKS(10)) != pdTRUE) {
+        EQ3_D(TAG, "Fail to queue command");
         return false;
     }
-    EQ3_D(TAG, "Queued command");
+    EQ3_D(TAG, "Command queued");
     return true;
 }
 
-/*
-* Gestisone dell'intera sessione: connessione,comandi, disconnessione
-*/
+// Scodatore dei comandi verso connect
+int  EQ3Connection::conn_dequeuer(){	
+
+    ConnCommand cmd;
+    bool conncommand_received = false;
+    if( !this->conn_task_busy_){
+        conncommand_received = false;
+		if (xQueueReceive(connection_queue_, &cmd, 0) == pdTRUE) { 
+			conncommand_received = true;
+		}
+		
+		if(conncommand_received){
+            EQ3_D(TAG, "Connection task command dequeued");
+		    conncommand_received = false;
+		    set_task_busy();
+            if(cmd.type == ConnCommandType::SEND_RAW)	{ 
+                session_RAW(cmd.data,cmd.length);
+            }	  
+		}		
+    }     
+ 	return 0;
+}
+
+// Avvio della sessione comando
+void EQ3Connection::session_RAW(const uint8_t *data, size_t len) {
+    if (len > sizeof(temp_cmd_data))
+        len = sizeof(temp_cmd_data);
+   
+    memcpy(temp_cmd_data, data, len);
+    temp_cmd_len = len;
+    this->connection_status_ = ConnectionStatus::START_SESSION;
+    this->timer_connect = 0;
+    this->connection_watchdog = 0;
+
+
+    /*std::string hex; char buf[6];
+    for (auto b : temp_cmd_data) {snprintf(buf, sizeof(buf), "%02X ", b); hex += buf;}
+    EQ3_D(TAG, "Session_raw: %s", hex.c_str()); */	
+    
+}
+
+// Gestisone dell'intera sessione: connessione,comandi, disconnessione
 void  EQ3Connection::session_Processor(){	
 
     bool now_connected = parent_->ble()->connected();
@@ -314,79 +314,85 @@ void  EQ3Connection::session_Processor(){
     }
 }
 
+// Invio Comando alla valvola
+void EQ3Connection::send_command() {
+
+    // Verifica write_ch_
+    if (!this->write_ch_) {
+        ESP_LOGW(TAG, "write channel unavailable");
+        return;
+    }
+    bool now_connected = parent_->ble()->connected();
+    if (!now_connected) {
+        ESP_LOGW(TAG, "Not connected, command ignored");
+        return;
+    }
+
+    // Validazione lunghezzadisconnect_delay
+    if (this->temp_cmd_len == 0 || this->temp_cmd_len > 23) {
+        ESP_LOGW(TAG, "Command lenght error (%i)", temp_cmd_len);
+        return;
+    }
+
+    // Otteniamo il BLEClient tramite il parent EQ3BT
+    auto *cli = this->parent_->ble();
+    if (!cli) {
+        ESP_LOGE(TAG, "BLEClient unavailable");
+        return;
+    }
+
+    // Eseguiamo la scrittura sulla characteristic
+    esp_err_t err = esp_ble_gattc_write_char(
+        cli->get_gattc_if(),
+        cli->get_conn_id(),
+        this->write_ch_->handle,
+        temp_cmd_len,
+        (uint8_t *)temp_cmd_data,
+        ESP_GATT_WRITE_TYPE_RSP,
+        ESP_GATT_AUTH_REQ_NONE
+    );
+
+    // Logging
+    if (err == ESP_OK) {
+        
+        std::string hex;
+        for (size_t i = 0; i < temp_cmd_len; i++) {
+            char buf[4];
+            sprintf(buf, " %02X", temp_cmd_data[i]);
+            hex += buf;
+        }
+        EQ3_D(TAG, "send_command - handle=0x%04X len=%d data:%s",
+            this->write_ch_->handle, (int)temp_cmd_len, hex.c_str());
+       
+    } else {
+        ESP_LOGW(TAG, "Send command error (err=%d)", err);
+    }
+}
+
+// 
+void EQ3Connection::connectionWatchdog() {
+    
+    if(this->conn_task_busy_) {
+        if(this->connection_watchdog > WATCHDOG_TIMEOUT) {
+            EQ3_D(TAG, "WATCHDOG_TIMEOUT");
+            reset_task_busy();
+            connection_status_ = ConnectionStatus::WAIT_STATE;  
+            local_copy.push_back(0xFF);
+            this->send_replay_to_app(); 
+            this->timer_connect = 0;
+            this->connection_watchdog = 0;
+        }
+    }
+}
 /*
 *
 */
 void  EQ3Connection::set_task_busy() {this->conn_task_busy_ = true;}
 void  EQ3Connection::reset_task_busy() {this->conn_task_busy_ = false;}
-/*
-* This Task main loop 
-*/
-void EQ3Connection::connect_task(){	
-	
-	this->conn_dequeuer();
-	this->session_Processor();
-}
 
-/*
-* Scodatore dei comandi verso connect
-*/
-int  EQ3Connection::conn_dequeuer(){	
 
-    ConnCommand cmd;
-    bool conncommand_received = false;
-    if( !this->conn_task_busy_){
-        conncommand_received = false;
-		if (xQueueReceive(connection_queue_, &cmd, 0) == pdTRUE) { 
-			conncommand_received = true;
-		}
-		
-		if(conncommand_received){
-            EQ3_D(TAG, "Connection task command dequeued");
-		    conncommand_received = false;
-		    set_task_busy();
-            if(cmd.type == ConnCommandType::SEND_RAW)	{ 
-                session_RAW(cmd.data,cmd.length);
-            }	  
-		}		
-    }     
- 	return 0;
-}
 
-/*
-*
-*/
-void EQ3Connection::con_task_init(){
 
-    if (!connection_queue_) 
-        ESP_LOGE(TAG, "Failed to create connection queue");
-    if (connection_queue_ == nullptr) { 
-        connection_queue_ = xQueueCreate(MAX_CONN_QUEUE, sizeof(ConnCommand));
-    } 
-   this->connection_status_ = ConnectionStatus::WAIT_STATE;
-} 
-
-/*
-* Avvio della sessione comando
-*/
-void EQ3Connection::session_RAW(const uint8_t *data, size_t len) {
-    if (len > sizeof(temp_cmd_data))
-        len = sizeof(temp_cmd_data);
-   
-    memcpy(temp_cmd_data, data, len);
-    temp_cmd_len = len;
-    this->connection_status_ = ConnectionStatus::START_SESSION;
-
-    /*std::string hex; char buf[6];
-    for (auto b : temp_cmd_data) {snprintf(buf, sizeof(buf), "%02X ", b); hex += buf;}
-    EQ3_D(TAG, "Session_raw: %s", hex.c_str()); */	
-    
-}
-
-/*
-* Timer di questo task 
-*/
-void EQ3Connection::increment_timer_connect() { this->timer_connect++;}
 
 /*
 *

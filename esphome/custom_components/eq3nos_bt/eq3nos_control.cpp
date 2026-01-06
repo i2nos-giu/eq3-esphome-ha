@@ -60,7 +60,7 @@ void EQ3Control::app_task(){
 void EQ3Control::handle_incoming_message(const std::vector<uint8_t> &msg) {
 
     this->local_msg = msg; 
-    rcv_msg_reaady = true; // flag dato pronto
+    rcv_msg_ready = true; // flag dato pronto
      // Stampa contenuto in HEX
     std::string hex;
     char buf[6];
@@ -76,8 +76,8 @@ void EQ3Control::handle_incoming_message(const std::vector<uint8_t> &msg) {
 */
 void EQ3Control::parse_msg(){
 
-    if(!rcv_msg_reaady) return; // no msg
-    rcv_msg_reaady = false;
+    if(!rcv_msg_ready) return; // no msg
+    rcv_msg_ready = false;
     if(!app_task_busy_) {
 		ESP_LOGW(TAG, "Received message outside protocol specification");
 		return;
@@ -105,7 +105,7 @@ void EQ3Control::parse_msg(){
 		    	case ApplicationStatus:: SET_BOOST_SWITCH:
 		    	case ApplicationStatus:: GET_CURR_TEMPERATURE:
 		    	case ApplicationStatus:: SET_TARGET_TEMPERATURE:
-                case ApplicationStatus::SET_LOCK_SWITCH:
+                case ApplicationStatus:: SET_LOCK_SWITCH:
 		    	
 		    			this->rcvd_base_status(this->application_status_);
 		    	break;
@@ -131,6 +131,12 @@ void EQ3Control::parse_msg(){
 
 		case 0x40:
 		  ESP_LOGW(TAG, "Unhandled message 0x40");
+		  break;
+
+        case 0xFF:
+		  ESP_LOGW(TAG, "WATCHDOG TRIGGER 0XFF");
+          this->recovery_counter++;
+          parent_->publish_recovery_counter_sensor(this->recovery_counter);
 		  break;
 
 		default:
@@ -188,7 +194,7 @@ void EQ3Control::rcvd_base_status(ApplicationStatus tipo) {
     uint8_t valve_percent = st.valve_percent;
     float target_temp_x2  = st.target_temp_x2 / 2.0f;
    
-    parent_->publish_base_field_(valve_percent, target_temp_x2, mode, locked_mode, boost_mode, open_windows_mode, battery_low);
+    parent_->publish_base_field(valve_percent, target_temp_x2, mode, locked_mode, boost_mode, open_windows_mode, battery_low);
   
 }
 
@@ -270,9 +276,7 @@ void EQ3Control::cmd_lock(bool state){
  
 }
 
-/*
-* Accodamento richiesta boost
-*/
+// Accodamento richiesta boost
 void EQ3Control::cmd_boost(bool state){
     
     EQ3_D(TAG, "Queueing boost command");
@@ -283,9 +287,8 @@ void EQ3Control::cmd_boost(bool state){
     bool err = this->applic_queuer(cmd); 
   
 }
-/*
-* Accodamento richiesta  target temperature
-*/
+
+// Accodamento richiesta  target temperature
 void EQ3Control::send_setpoint_(uint8_t target){
 
     EQ3_D(TAG, "Queueing set target temperature command");
@@ -313,7 +316,7 @@ int  EQ3Control::app_dequeuer(){
             EQ3_D(TAG, "Application task command dequeued");
             command_received = false;
             this->app_task_busy_ = true;
-            this->rcv_msg_reaady = false;
+            this->rcv_msg_ready = false;
         
             switch(cmd.type) {
                 case AppCommandType::GET_INFO:
@@ -508,9 +511,8 @@ void EQ3Control::send_lock(bool state){
 	parent_->send_command_to_connection(cmd);
    
 }
-/*
-* Invia il comando alla valvola
-*/
+
+// Send boos command to valve
 void EQ3Control::send_boost(bool state){
     
     EQ3_D(TAG, "Requesting BOOST %s", state? "ON": "OFF");
