@@ -1,7 +1,7 @@
 #pragma once
 #include "debug.h"
 #include "eq3nos_bt_entities.h"
-#include "eq3nos_connect.h"
+#include "eq3nos_ble.h"
 #include "eq3nos_control.h"
 #include "eq3_target_number.h"
 #include "esphome/core/component.h"
@@ -164,7 +164,7 @@ protected:
         void module_init();
 
 private:
-		EQ3Connection connection_;
+		EQ3NOSBLE connection_;
         bool module_to_init = true;
         bool sync_target_temperature = true;
         bool ble_client_init_error = false;

@@ -1,15 +1,12 @@
 #include "debug.h"
-#include "eq3nos_connect.h"
+#include "eq3nos_ble.h"
 #include "eq3nos_bt.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
 namespace eq3nos_bt {
 
-static const char *TAG = "eq3_connection";
-
-//EQ3Connection::EQ3Connection() : status_(DISCONNECTED) {}
-
+static const char *TAG = "eq3nos_ble";
 
 
 // Helper per accedere ai protected di BLEClientBase
@@ -22,7 +19,7 @@ struct FriendClient : public esphome::esp32_ble_client::BLEClientBase {
 /*
 * Gestione della callback
 */
-void EQ3Connection::on_ble_event(esp_gattc_cb_event_t event,
+void EQ3NOSBLE::on_ble_event(esp_gattc_cb_event_t event,
                                  esp_gatt_if_t gatt_if,
                                  esp_ble_gattc_cb_param_t *param) {
 	switch (event) {
@@ -54,12 +51,12 @@ void EQ3Connection::on_ble_event(esp_gattc_cb_event_t event,
 }
 
 // Gira il messaggio ricevuto dalla valvola all'applicazione
-void EQ3Connection::send_replay_to_app() { this->parent_->send_msg_to_app(local_copy); }
+void EQ3NOSBLE::send_replay_to_app() { this->parent_->send_msg_to_app(local_copy); }
 
 /*
 * Il discovery fallisce con le eq3 per cui risolve manualmente 
 */
-void  EQ3Connection::on_services_resolved_manual() {
+void  EQ3NOSBLE::on_services_resolved_manual() {
  // Handle noti del servizio EQ3 (dati dal log proxy)
 	this->write_handle_  = 0x0411;  // characteristic di scrittura
 	this->notify_handle_ = 0x0421;  // characteristic di notifica
@@ -83,7 +80,7 @@ void  EQ3Connection::on_services_resolved_manual() {
 }
 
 // Dopo la connessione occorre settare il canale di notifica
-void EQ3Connection::after_connected_() {
+void EQ3NOSBLE::after_connected_() {
 
     auto *cli = this->parent_->ble();
     if (!cli) {
@@ -128,7 +125,7 @@ void EQ3Connection::after_connected_() {
 
 
 // Create connection queue
-void EQ3Connection::con_task_init(){
+void EQ3NOSBLE::con_task_init(){
 
     if (!connection_queue_) 
         ESP_LOGE(TAG, "Failed to create connection queue");
@@ -139,10 +136,10 @@ void EQ3Connection::con_task_init(){
 } 
 
 // Timer of this task
-void EQ3Connection::increment_timer_connect() { this->timer_connect++; this->connection_watchdog++;}
+void EQ3NOSBLE::increment_timer_connect() { this->timer_connect++; this->connection_watchdog++;}
 
 // This Task main loop 
-void EQ3Connection::connect_task(){	
+void EQ3NOSBLE::connect_task(){	
 	
 	this->conn_dequeuer();
 	this->session_Processor();
@@ -150,7 +147,7 @@ void EQ3Connection::connect_task(){
 }
 
 // Async command queuer for task ble connection
-bool EQ3Connection::connect_queuer(const ConnCommand &cmd) {
+bool EQ3NOSBLE::connect_queuer(const ConnCommand &cmd) {
 
     EQ3_D(TAG, "Connect task received command type=%d, len=%d from application task",
         (int)cmd.type, 
@@ -174,7 +171,7 @@ bool EQ3Connection::connect_queuer(const ConnCommand &cmd) {
 }
 
 // Scodatore dei comandi verso connect
-int  EQ3Connection::conn_dequeuer(){	
+int  EQ3NOSBLE::conn_dequeuer(){	
 
     ConnCommand cmd;
     bool conncommand_received = false;
@@ -197,7 +194,7 @@ int  EQ3Connection::conn_dequeuer(){
 }
 
 // Avvio della sessione comando
-void EQ3Connection::session_RAW(const uint8_t *data, size_t len) {
+void EQ3NOSBLE::session_RAW(const uint8_t *data, size_t len) {
     if (len > sizeof(temp_cmd_data))
         len = sizeof(temp_cmd_data);
    
@@ -215,7 +212,7 @@ void EQ3Connection::session_RAW(const uint8_t *data, size_t len) {
 }
 
 // Gestisone dell'intera sessione: connessione,comandi, disconnessione
-void  EQ3Connection::session_Processor(){	
+void  EQ3NOSBLE::session_Processor(){	
 
     bool now_connected = parent_->ble()->connected();
     switch(this->connection_status_) {
@@ -292,7 +289,7 @@ void  EQ3Connection::session_Processor(){
                 parent_->ble()->connect(); // avvio tentativo
                 connection_status_ = ConnectionStatus::CONNECTION_REQUESTED;
             } else
-            	connection_status_ = SEND_COMMAND;
+            	connection_status_ = ConnectionStatus::SEND_COMMAND;
             //EQ3_D(TAG, "Avvio connessione");
         break;
          case ConnectionStatus::GENERIC_DISCONNECT:
@@ -315,7 +312,7 @@ void  EQ3Connection::session_Processor(){
 }
 
 // Invio Comando alla valvola
-void EQ3Connection::send_command() {
+void EQ3NOSBLE::send_command() {
 
     // Verifica write_ch_
     if (!this->write_ch_) {
@@ -370,7 +367,7 @@ void EQ3Connection::send_command() {
 }
 
 // 
-void EQ3Connection::connectionWatchdog() {
+void EQ3NOSBLE::connectionWatchdog() {
     
     if(this->conn_task_busy_) {
         if(this->connection_watchdog > WATCHDOG_TIMEOUT) {
@@ -387,8 +384,8 @@ void EQ3Connection::connectionWatchdog() {
 /*
 *
 */
-void  EQ3Connection::set_task_busy() {this->conn_task_busy_ = true;}
-void  EQ3Connection::reset_task_busy() {this->conn_task_busy_ = false;}
+void  EQ3NOSBLE::set_task_busy() {this->conn_task_busy_ = true;}
+void  EQ3NOSBLE::reset_task_busy() {this->conn_task_busy_ = false;}
 
 
 
@@ -397,7 +394,7 @@ void  EQ3Connection::reset_task_busy() {this->conn_task_busy_ = false;}
 /*
 *
 */
-void EQ3Connection::set_parent(EQ3NOS *parent) {
+void EQ3NOSBLE::set_parent(EQ3NOS *parent) {
     this->parent_ = parent;
 }
 
