@@ -1,5 +1,5 @@
 #pragma once
-#include "debug.h"
+#include "eq3nos_log.h"
 #include "eq3nos_bt_entities.h"
 #include "eq3nos_ble.h"
 #include "eq3nos_control.h"

@@ -1,4 +1,4 @@
-#include "debug.h"
+#include "eq3nos_log.h"
 #include "eq3nos_ble.h"
 #include "eq3nos_bt.h"
 #include "esphome/core/log.h"

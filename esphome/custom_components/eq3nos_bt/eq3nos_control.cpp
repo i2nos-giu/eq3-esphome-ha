@@ -1,9 +1,9 @@
-#include "debug.h"
+#include "eq3nos_log.h"
 #include "eq3nos_control.h"
 #include "eq3nos_bt.h"
 #include "esphome/core/log.h"
 #include "esp_log.h"
-#include "eq3nos_conncommand.h"
+#include "eq3nos_types.h"
 
 namespace esphome {
 namespace eq3nos_bt {

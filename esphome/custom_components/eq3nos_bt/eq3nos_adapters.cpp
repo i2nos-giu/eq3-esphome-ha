@@ -1,4 +1,4 @@
-#include "Eq3Adapters.h"
+#include "eq3nos_adapters.h"
 #include <cmath>
 
 

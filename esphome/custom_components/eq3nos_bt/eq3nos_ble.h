@@ -7,7 +7,7 @@
 #include "freertos/queue.h"
 
 #include "esphome/components/ble_client/ble_client.h"
-#include "eq3nos_conncommand.h"
+#include "eq3nos_types.h"
 
 /**
  * @file

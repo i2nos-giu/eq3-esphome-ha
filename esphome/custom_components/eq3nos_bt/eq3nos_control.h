@@ -6,7 +6,7 @@
 #include "esphome/core/log.h"
 #include <sstream>
 #include <iomanip>
-#include "Eq3Adapters.h"
+#include "eq3nos_adapters.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/time/real_time_clock.h"
 
