@@ -24,14 +24,15 @@ void EQ3NOS::setup() {
     control_.app_task_init();
 
     // Inizializzo connessione
-    connection_.set_parent(this);      // parent per callback di connessione
-    connection_.con_task_init();
+    ble_transport_.set_parent(this);      // parent per callback di connessione
+    ble_transport_.con_task_init();
     
     sync_target_temperature = true;  // sincronizza il display della temperatura target
 
     this->module_to_init = true;
 }
-// Init check
+
+// Set flag for init from main loop
 void EQ3NOS::module_init() {
     //delay(3000);
     this->module_to_init = false;
@@ -51,29 +52,26 @@ void EQ3NOS::loop() {
     last_attempt = millis();
    
     this->control_.increment_timer_applic();
-    this->connection_.increment_timer_connect();
+    this->ble_transport_.increment_timer_connect();
     
     this->control_.app_task();
-    this->connection_.connect_task();
+    this->ble_transport_.connect_task();
 }
 
-// Ruota comando al task connection
-void EQ3NOS::send_command_to_connection(const ConnCommand &cmd ) {  
+void EQ3NOS::send_command_to_ble_transport(const ConnCommand &cmd ) {  
 		//this->get_eq3_time();
     EQ3_D(TAG, "Received command from application");
-    bool error = connection_.connect_queuer(cmd);  
+    bool error = ble_transport_.command_queuer(cmd);  
     EQ3_D(TAG, "%s command to connection.", error? "queued": "not queued" ); 
 }
 
-// Ruota il messaggio all'applicazione
-void EQ3NOS::send_msg_to_app(const std::vector<uint8_t> &msg) {
+void EQ3NOS::send_replay_to_control(const std::vector<uint8_t> &msg) {
     EQ3_D(TAG, "Received replay from connection");
     this->control_.handle_incoming_message(msg);
     EQ3_D(TAG, "replay received from application" ); 
 }
-/*
-* Mode Selector
-*/
+
+// =================== MODE SELECTOR ===================
 void EQ3ModeSelect::control(const std::string &value) {
 
     if (!parent_) {
@@ -90,9 +88,7 @@ void EQ3ModeSelect::control(const std::string &value) {
     //mode_select_->publish_state(value);
 }
 
-/*
-* LOCK switch
-*/
+// =================== LOOK SWITCH ===================
 void EQ3LockSwitch::write_state(bool state) {
     if (!parent_) {
         ESP_LOGW(TAG, "Lock switch parent not set!");
@@ -134,29 +130,23 @@ void EQ3NOS::request_boost(bool state) {
 
 }
 
-/*
-* Set target temperatura - Richiamata da Home Assistant
-*/
+// ================= SET TARGET TEMPERATURE =================
 void EQ3NOS::set_target_temperature(float celsius) {
     celsius = clamp(celsius, 5.0f, 30.0f);
     uint8_t target = static_cast<uint8_t>(roundf(celsius * 2.0f));
     control_.send_setpoint_(target);
+
     EQ3_D("EQ3", "Setpoint %.1f °C -> TT = 0x%02X (%d)",
          celsius, target, target);
 }
 
-/*
-* Callback eventi GATT (override diretto da BLEClientNode)
-*/
+// =========== Handle BLE client events from ESP-IDF ===========
 void EQ3NOS::gattc_event_handler  (esp_gattc_cb_event_t event,
                                 esp_gatt_if_t gatt_if,
                                 esp_ble_gattc_cb_param_t *param) {
-    connection_.on_ble_event(event, gatt_if, param);
+    ble_transport_.on_ble_event(event, gatt_if, param);
 }
 
-/*
-* Pubblica serial number e fimware version
-*/
 void EQ3NOS::publish_eq3_identification(std::string &sn, std::string &fw) {
     this->serial_number_ = sn;
     this->eq3_firmware_ = fw;
@@ -167,18 +157,12 @@ void EQ3NOS::publish_eq3_identification(std::string &sn, std::string &fw) {
         eq3_firmware_sensor_->publish_state(this->eq3_firmware_);
 }        
 
-/*
-* Pubblica il recovery counter
-*/
 void EQ3NOS::publish_recovery_counter_sensor(uint16_t rc_) {
     if (recovery_counter_sensor_ != nullptr) {
         recovery_counter_sensor_->publish_state(rc_);
     }
 }
 
-/*
-* Pubblica temperature e flags
-*/
 void EQ3NOS::publish_base_field(uint8_t vp, float tt,  Eq3Mode mode, bool lm, bool bt, bool ws, bool bl){
     this->valve_percent = vp;
     //this->current_temperature = ct;
@@ -238,8 +222,6 @@ void EQ3NOS::publish_base_field(uint8_t vp, float tt,  Eq3Mode mode, bool lm, bo
     }
 }
 
-
-
 esphome::ESPTime EQ3NOS::get_eq3_time(){
 	auto now = time_source_->now();
 	EQ3_D(TAG, "Time now: %04d-%02d-%02d %02d:%02d:%02d",
@@ -247,9 +229,6 @@ esphome::ESPTime EQ3NOS::get_eq3_time(){
          now.hour, now.minute, now.second);
          return now;
 }
-
-
-
 
 }  // namespace eq3nos_bt
 }  // namespace esphome

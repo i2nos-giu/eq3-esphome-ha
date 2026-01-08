@@ -104,7 +104,7 @@ public:
      * @param cmd Command descriptor (type + payload).
      * @return true if the command was queued, false if queue unavailable/full.
      */
-    bool connect_queuer(const ConnCommand &cmd);
+    bool command_queuer(const ConnCommand &cmd);
 
     void increment_timer_connect(); // Timer per gestione task
   
@@ -114,7 +114,7 @@ public:
 
 private:
     EQ3NOS *parent_{nullptr};
-    QueueHandle_t connection_queue_{nullptr};
+    QueueHandle_t ble_transport_queue_{nullptr};
     esphome::esp32_ble_client::BLECharacteristic *write_ch_ = nullptr;
 	esphome::esp32_ble_client::BLECharacteristic *notify_ch_ = nullptr;
 
@@ -147,14 +147,14 @@ private:
      * @note Requires an active BLE connection and a resolved write handle.
      */
     void send_command();
-    int conn_dequeuer(); 
+    int command_dequeuer(); 
     void session_Processor();
 	void session_RAW(const uint8_t *data, size_t len);
     ConnectionStatus connection_status_;
     uint8_t temp_cmd_data[16];
     size_t temp_cmd_len = 0;
 	uint32_t timer_connect = 0;
-    uint32_t connection_watchdog = 0;
+    uint32_t ble_transport_watchdog = 0;
     bool resolved = false;
     bool rcv_replay = false;
     bool conn_task_busy_ = false;

@@ -370,7 +370,7 @@ void EQ3Control::get_info(){
     cmd.length = 1;
     this->application_status_ = ApplicationStatus::GET_SERIAL_NUMBER;
     this->app_task_busy_=true;	// flag di elaborazione in corso
-    parent_->send_command_to_connection(cmd);
+    parent_->send_command_to_ble_transport(cmd);
     
 	
 }
@@ -389,7 +389,7 @@ void EQ3Control::get_current_temp(){
     cmd.length = 1;
     this->application_status_ = ApplicationStatus::GET_CURR_TEMPERATURE;
     this->app_task_busy_=true;	// flag di elaborazione in corso
-    parent_->send_command_to_connection(cmd);		
+    parent_->send_command_to_ble_transport(cmd);		
 }
 
 /*
@@ -426,8 +426,8 @@ void EQ3Control::set_eq3_time() {
 
     this->application_status_ = ApplicationStatus::NOW_UPDATE_TIME;
     this->app_task_busy_ = true;
-    parent_->send_command_to_connection(cmd);
-   // parent_->send_command_to_connection(pkt);
+    parent_->send_command_to_ble_transport(cmd);
+   // parent_->send_command_to_ble_transport(pkt);
    
 }
 
@@ -465,7 +465,7 @@ void EQ3Control::send_mode(Eq3Mode mode){
     }
 		  
     this->app_task_busy_=true;	// flag di elaborazione in corso    
-	parent_->send_command_to_connection(cmd);
+	parent_->send_command_to_ble_transport(cmd);
    
 }
 
@@ -484,7 +484,7 @@ void EQ3Control::send_target_temp(uint8_t temp){
     
     this->application_status_ = ApplicationStatus::SET_TARGET_TEMPERATURE;
     this->app_task_busy_=true;	// flag di elaborazione in corso    
-	parent_->send_command_to_connection(cmd);
+	parent_->send_command_to_ble_transport(cmd);
    
 }
 
@@ -508,7 +508,7 @@ void EQ3Control::send_lock(bool state){
     
     this->application_status_ = ApplicationStatus::SET_LOCK_SWITCH;
     this->app_task_busy_=true;	// flag di elaborazione in corso    
-	parent_->send_command_to_connection(cmd);
+	parent_->send_command_to_ble_transport(cmd);
    
 }
 
@@ -530,7 +530,7 @@ void EQ3Control::send_boost(bool state){
     
     this->application_status_ = ApplicationStatus::SET_BOOST_SWITCH;
     this->app_task_busy_=true;	// flag di elaborazione in corso    
-	parent_->send_command_to_connection(cmd);
+	parent_->send_command_to_ble_transport(cmd);
    
 }
 

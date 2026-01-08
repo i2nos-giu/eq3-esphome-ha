@@ -109,8 +109,8 @@ class EQ3NOS
         void publish_recovery_counter_sensor(uint16_t rc_);
 
         // ----- Internal messaging -----
-        void send_command_to_connection(const ConnCommand &cmd);
-		void send_msg_to_app(const std::vector<uint8_t> &msg);
+        void send_command_to_ble_transport(const ConnCommand &cmd);
+		void send_replay_to_control(const std::vector<uint8_t> &msg);
 
         // ----- Time -----
         void set_time_source(esphome::time::RealTimeClock *t) {this->time_source_ = t; }
@@ -164,7 +164,7 @@ protected:
         void module_init();
 
 private:
-		EQ3NOSBLE connection_;
+		EQ3NOSBLE ble_transport_;
         bool module_to_init = true;
         bool sync_target_temperature = true;
         bool ble_client_init_error = false;

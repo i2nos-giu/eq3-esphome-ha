@@ -16,9 +16,7 @@ struct FriendClient : public esphome::esp32_ble_client::BLEClientBase {
     using esphome::esp32_ble_client::BLEClientBase::remote_bda_;
 };
 
-/*
-* Gestione della callback
-*/
+// ============ Handle ESP-IDF GATTC events  ====================
 void EQ3NOSBLE::on_ble_event(esp_gattc_cb_event_t event,
                                  esp_gatt_if_t gatt_if,
                                  esp_ble_gattc_cb_param_t *param) {
@@ -50,12 +48,8 @@ void EQ3NOSBLE::on_ble_event(esp_gattc_cb_event_t event,
 	}
 }
 
-// Gira il messaggio ricevuto dalla valvola all'applicazione
-void EQ3NOSBLE::send_replay_to_app() { this->parent_->send_msg_to_app(local_copy); }
+void EQ3NOSBLE::send_replay_to_app() { this->parent_->send_replay_to_control(local_copy); }
 
-/*
-* Il discovery fallisce con le eq3 per cui risolve manualmente 
-*/
 void  EQ3NOSBLE::on_services_resolved_manual() {
  // Handle noti del servizio EQ3 (dati dal log proxy)
 	this->write_handle_  = 0x0411;  // characteristic di scrittura
@@ -79,7 +73,6 @@ void  EQ3NOSBLE::on_services_resolved_manual() {
    // ESP_LOGW(TAG, "write_ch_=%p handle=%04X", this->write_ch_, this->write_ch_ ? this->write_ch_->handle : 0);
 }
 
-// Dopo la connessione occorre settare il canale di notifica
 void EQ3NOSBLE::after_connected_() {
 
     auto *cli = this->parent_->ble();
@@ -123,37 +116,35 @@ void EQ3NOSBLE::after_connected_() {
     } 
 }
 
-
-// Create connection queue
 void EQ3NOSBLE::con_task_init(){
 
-    if (!connection_queue_) 
+    if (!ble_transport_queue_) 
         ESP_LOGE(TAG, "Failed to create connection queue");
-    if (connection_queue_ == nullptr) { 
-        connection_queue_ = xQueueCreate(MAX_CONN_QUEUE, sizeof(ConnCommand));
+    if (ble_transport_queue_ == nullptr) { 
+        ble_transport_queue_ = xQueueCreate(MAX_CONN_QUEUE, sizeof(ConnCommand));
     } 
    this->connection_status_ = ConnectionStatus::WAIT_STATE;
 } 
 
 // Timer of this task
-void EQ3NOSBLE::increment_timer_connect() { this->timer_connect++; this->connection_watchdog++;}
+void EQ3NOSBLE::increment_timer_connect() { this->timer_connect++; this->ble_transport_watchdog++;}
 
 // This Task main loop 
 void EQ3NOSBLE::connect_task(){	
 	
-	this->conn_dequeuer();
+	this->command_dequeuer();
 	this->session_Processor();
     this->connectionWatchdog();
 }
 
 // Async command queuer for task ble connection
-bool EQ3NOSBLE::connect_queuer(const ConnCommand &cmd) {
+bool EQ3NOSBLE::command_queuer(const ConnCommand &cmd) {
 
     EQ3_D(TAG, "Connect task received command type=%d, len=%d from application task",
         (int)cmd.type, 
         (int)cmd.length);
 
-    if (!connection_queue_) {
+    if (!ble_transport_queue_) {
         ESP_LOGE(TAG, "Connection queue unavailable");
         return false;
     }
@@ -162,7 +153,7 @@ bool EQ3NOSBLE::connect_queuer(const ConnCommand &cmd) {
    //     EQ3_D(TAG, " connect_queuer: data[%d] = 0x%02X", i, cmd.data[i]);
    // }
     ConnCommand copy = cmd;
-    if (xQueueSendToBack(connection_queue_, &copy, pdMS_TO_TICKS(10)) != pdTRUE) {
+    if (xQueueSendToBack(ble_transport_queue_, &copy, pdMS_TO_TICKS(10)) != pdTRUE) {
         EQ3_D(TAG, "Fail to queue command");
         return false;
     }
@@ -170,14 +161,14 @@ bool EQ3NOSBLE::connect_queuer(const ConnCommand &cmd) {
     return true;
 }
 
-// Scodatore dei comandi verso connect
-int  EQ3NOSBLE::conn_dequeuer(){	
+// Async command dequeuer for task ble connection
+int  EQ3NOSBLE::command_dequeuer(){	
 
     ConnCommand cmd;
     bool conncommand_received = false;
     if( !this->conn_task_busy_){
         conncommand_received = false;
-		if (xQueueReceive(connection_queue_, &cmd, 0) == pdTRUE) { 
+		if (xQueueReceive(ble_transport_queue_, &cmd, 0) == pdTRUE) { 
 			conncommand_received = true;
 		}
 		
@@ -193,7 +184,7 @@ int  EQ3NOSBLE::conn_dequeuer(){
  	return 0;
 }
 
-// Avvio della sessione comando
+// send raw data to the valve
 void EQ3NOSBLE::session_RAW(const uint8_t *data, size_t len) {
     if (len > sizeof(temp_cmd_data))
         len = sizeof(temp_cmd_data);
@@ -202,7 +193,7 @@ void EQ3NOSBLE::session_RAW(const uint8_t *data, size_t len) {
     temp_cmd_len = len;
     this->connection_status_ = ConnectionStatus::START_SESSION;
     this->timer_connect = 0;
-    this->connection_watchdog = 0;
+    this->ble_transport_watchdog = 0;
 
 
     /*std::string hex; char buf[6];
@@ -211,7 +202,7 @@ void EQ3NOSBLE::session_RAW(const uint8_t *data, size_t len) {
     
 }
 
-// Gestisone dell'intera sessione: connessione,comandi, disconnessione
+// State machine
 void  EQ3NOSBLE::session_Processor(){	
 
     bool now_connected = parent_->ble()->connected();
@@ -370,14 +361,14 @@ void EQ3NOSBLE::send_command() {
 void EQ3NOSBLE::connectionWatchdog() {
     
     if(this->conn_task_busy_) {
-        if(this->connection_watchdog > WATCHDOG_TIMEOUT) {
+        if(this->ble_transport_watchdog > WATCHDOG_TIMEOUT) {
             EQ3_D(TAG, "WATCHDOG_TIMEOUT");
             reset_task_busy();
             connection_status_ = ConnectionStatus::WAIT_STATE;  
             local_copy.push_back(0xFF);
             this->send_replay_to_app(); 
             this->timer_connect = 0;
-            this->connection_watchdog = 0;
+            this->ble_transport_watchdog = 0;
         }
     }
 }
@@ -386,10 +377,6 @@ void EQ3NOSBLE::connectionWatchdog() {
 */
 void  EQ3NOSBLE::set_task_busy() {this->conn_task_busy_ = true;}
 void  EQ3NOSBLE::reset_task_busy() {this->conn_task_busy_ = false;}
-
-
-
-
 
 /*
 *
