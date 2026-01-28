@@ -140,7 +140,9 @@ void EQ3NOSBLE::connect_task(){
 // Async command queuer for task ble connection
 bool EQ3NOSBLE::command_queuer(const ConnCommand &cmd) {
 
-    EQ3_D(TAG, "Connect task received command type=%d, len=%d from application task",
+    EQ3_D(TAG, "%s [%s] - Connect task received command type=%d, len=%d from application task",
+        parent_->get_name().c_str(),
+        parent_->get_mac_address().c_str(),
         (int)cmd.type, 
         (int)cmd.length);
 

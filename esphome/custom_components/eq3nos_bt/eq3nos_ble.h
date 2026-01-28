@@ -27,11 +27,13 @@
 #define DISCONNECT_NOW 3 // disconnecti dopo 3 sec
 #define WATCHDOG_TIMEOUT 15 // Errore dopo 15 sec senza risposta BLE
 
+
+
+
 namespace esphome {
 namespace eq3nos_bt {
 
 class EQ3NOS;  // forward declaration
-
 /**
  * @brief Internal BLE session state machine.
  * @note These are transport-layer states (not EQ3 protocol states).

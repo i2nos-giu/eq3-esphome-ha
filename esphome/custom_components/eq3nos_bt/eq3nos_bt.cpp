@@ -9,7 +9,7 @@ static const char *TAG = "eq3nos_bt";
 
 // =================== EQ3NOS ===================
 void EQ3NOS::setup() {
-
+    ESP_LOGI(TAG, "EQ3NOS setup: %s [%s]", this->name_.c_str(), this->mac_address_.c_str());
     this->ble_client_init_error = true;
     if (ble_client::BLEClientNode::parent_ == nullptr) {
         this->ble_client_init_error = true;
@@ -21,54 +21,69 @@ void EQ3NOS::setup() {
     ble_client::BLEClientNode::parent_->register_ble_node(this);
 
     control_.set_parent(this);
-    control_.app_task_init();
+   // control_.app_task_init();
 
     // Inizializzo connessione
     ble_transport_.set_parent(this);      // parent per callback di connessione
-    ble_transport_.con_task_init();
+   // ble_transport_.con_task_init();
     
     sync_target_temperature = true;  // sincronizza il display della temperatura target
 
-    this->module_to_init = true;
+    this->module_to_init = 2;
+
+
 }
 
 // Set flag for init from main loop
 void EQ3NOS::module_init() {
-    //delay(3000);
-    this->module_to_init = false;
+    if (millis() - this->start_delay < 1000) return; // timer 1 secondo
+    this->start_delay = millis();
+
+    //this->module_to_init = false;
     if (ble_client_init_error)
-        ESP_LOGE(TAG, "Parent BLE not set!");   
-    EQ3_D(TAG, "📡 EQ3NOS: setup complited"); 
+        ESP_LOGE(TAG, "Parent BLE not set!"); 
+    if (this->module_to_init == 2 ) {
+        ble_transport_.con_task_init();
+        ESP_LOGI(TAG, "Transport task ready!"); 
+        this->module_to_init--;
+    } 
+    if (this->module_to_init == 1) {
+        control_.app_task_init();
+        ESP_LOGI(TAG, "Control task ready!"); 
+        this->module_to_init--;
+    }
+
+    EQ3_D(TAG, "%s [%s] -📡 EQ3NOS: setup complited",this->name_.c_str(), this->mac_address_.c_str()); 
 }
 
 // Main loop
 void EQ3NOS::loop() {
-    if(this->module_to_init == true)
-        module_init();
-    
-    static uint32_t last_attempt = 0;
+    if(this->module_to_init > 0)
+        module_init(); 
     
 	if (millis() - last_attempt < 1000) return; // timer 1 secondo
     last_attempt = millis();
-   
+  
     this->control_.increment_timer_applic();
     this->ble_transport_.increment_timer_connect();
-    
+
     this->control_.app_task();
     this->ble_transport_.connect_task();
+     
 }
 
 void EQ3NOS::send_command_to_ble_transport(const ConnCommand &cmd ) {  
 		//this->get_eq3_time();
-    EQ3_D(TAG, "Received command from application");
+ 
+    EQ3_D(TAG, "%s [%s] -  Received command from application", this->name_.c_str(), this->mac_address_.c_str());
     bool error = ble_transport_.command_queuer(cmd);  
-    EQ3_D(TAG, "%s command to connection.", error? "queued": "not queued" ); 
+    EQ3_D(TAG, "%s [%s] -%s command to connection.", this->name_.c_str(), this->mac_address_.c_str(), error? "queued": "not queued" ); 
 }
 
 void EQ3NOS::send_replay_to_control(const std::vector<uint8_t> &msg) {
-    EQ3_D(TAG, "Received replay from connection");
+    EQ3_D(TAG, "%s [%s] -Received replay from connection", this->name_.c_str(), this->mac_address_.c_str());
     this->control_.handle_incoming_message(msg);
-    EQ3_D(TAG, "replay received from application" ); 
+    EQ3_D(TAG, "%s [%s] -replay received from application", this->name_.c_str(), this->mac_address_.c_str()); 
 }
 
 // =================== MODE SELECTOR ===================
@@ -111,22 +126,25 @@ void EQ3BoostSwitch::write_state(bool state) {
 
 // =================== OFF SWITCH ===================
 void EQ3OffSwitch::write_state(bool state) {
-  EQ3_D(TAG, "Off switch changed state: %s", state ? "ON" : "OFF");
-  if (!parent_) {
-    ESP_LOGW(TAG, "Off switch parent not set!");
-    return;
-  }
+  
+    if (!parent_) {
+        ESP_LOGW(TAG, "Off switch parent not set!");
+        return;
+    }
+    EQ3_D(TAG, "%s [%s] -Off switch changed state: %s", 
+    parent_->get_name().c_str(),
+    parent_->get_mac_address().c_str());
 
   //parent_->request_off(state);
 }
 
 void EQ3NOS::set_mode_select(EQ3ModeSelect *sel) {
-   EQ3_D(TAG, "Set mode select");
+   EQ3_D(TAG, "%s [%s] -Set mode select", this->name_.c_str(), this->mac_address_.c_str());
   mode_select_ = sel;
 }
 
 void EQ3NOS::request_boost(bool state) {
-  EQ3_D(TAG, " Cosa devo fare qui? Request BOOST state: %s", state ? "ON" : "OFF");
+  EQ3_D(TAG, "%s [%s] - Cosa devo fare qui? Request BOOST state: %s", state ? "ON" : "OFF");
 
 }
 
@@ -136,8 +154,8 @@ void EQ3NOS::set_target_temperature(float celsius) {
     uint8_t target = static_cast<uint8_t>(roundf(celsius * 2.0f));
     control_.send_setpoint_(target);
 
-    EQ3_D("EQ3", "Setpoint %.1f °C -> TT = 0x%02X (%d)",
-         celsius, target, target);
+    EQ3_D(TAG, "%s [%s] - Setpoint %.1f °C -> TT = 0x%02X (%d)",
+         this->name_.c_str(), this->mac_address_.c_str(),celsius, target, target);
 }
 
 // =========== Handle BLE client events from ESP-IDF ===========
@@ -224,7 +242,8 @@ void EQ3NOS::publish_base_field(uint8_t vp, float tt,  Eq3Mode mode, bool lm, bo
 
 esphome::ESPTime EQ3NOS::get_eq3_time(){
 	auto now = time_source_->now();
-	EQ3_D(TAG, "Time now: %04d-%02d-%02d %02d:%02d:%02d",
+	EQ3_D(TAG, "%s [%s] -Time now: %04d-%02d-%02d %02d:%02d:%02d",
+         this->name_.c_str(), this->mac_address_.c_str(),
          now.year, now.month, now.day_of_month,
          now.hour, now.minute, now.second);
          return now;

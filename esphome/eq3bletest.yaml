@@ -16,8 +16,8 @@ logger:
   level: DEBUG
   logs:
     eq3nos_bt: DEBUG
-    #    esp32_ble_client: DEBUG
-    #    esp32_ble_tracker: DEBUG
+    esp32_ble_client: DEBUG
+    esp32_ble_tracker: DEBUG
 
 
 # Enable Home Assistant API
@@ -46,6 +46,10 @@ time:
   - platform: sntp
     id: sntp_time
 
+esp32_ble:
+  io_capability: keyboard_only
+  disable_bt_logs: false
+
 # Abilita il tracker BLE
 esp32_ble_tracker:
   scan_parameters:
@@ -57,6 +61,11 @@ ble_client:
   - mac_address:  !secret mac_01 
     id: eq3_client_1
     auto_connect: false
+    on_passkey_request:
+      - logger.log: "I2NOS->EQ3 passkey requested"
+      - ble_client.passkey_reply:
+            id: eq3_client_1
+            passkey: 314661  # il PIN della tua EQ3
 
   - mac_address: !secret mac_02
     id: eq3_client_2

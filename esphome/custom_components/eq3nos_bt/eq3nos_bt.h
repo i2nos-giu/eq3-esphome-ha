@@ -116,6 +116,9 @@ class EQ3NOS
         void set_time_source(esphome::time::RealTimeClock *t) {this->time_source_ = t; }
         esphome::ESPTime get_eq3_time();
 
+        const std::string &get_name() const { return name_; }
+        const std::string &get_mac_address() const { return mac_address_; }
+
         // Expose control (if used externally)
         EQ3Control control_;
 
@@ -165,7 +168,9 @@ protected:
 
 private:
 		EQ3NOSBLE ble_transport_;
-        bool module_to_init = true;
+        uint32_t last_attempt = 0;
+        uint32_t start_delay = 0;
+        int module_to_init = 2;
         bool sync_target_temperature = true;
         bool ble_client_init_error = false;
       

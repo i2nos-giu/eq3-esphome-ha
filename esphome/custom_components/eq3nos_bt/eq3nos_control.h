@@ -31,6 +31,13 @@
 /// @brief Maximum recovery timeout (in seconds) before resetting busy state.
 #define RECOVERY_MAX_TIME 20
 
+
+                    
+namespace esphome {
+namespace eq3nos_bt {
+
+class EQ3NOS;   // forward declaration
+
 /**
  * @brief Operating mode reported by the EQ3 valve.
  * @ingroup eq3_protocol
@@ -42,11 +49,6 @@ enum class Eq3Mode : uint8_t {
     MANUAL = 1,     ///< Manual setpoint mode.
     VACATION = 2,   ///< Vacation setpoint mode.
 };
-                    
-namespace esphome {
-namespace eq3nos_bt {
-
-class EQ3NOS;   // forward declaration
 
 /**
  * @brief Internal application state machine steps.
